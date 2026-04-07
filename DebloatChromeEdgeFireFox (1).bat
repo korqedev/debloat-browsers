@@ -1,60 +1,95 @@
 @ECHO OFF
-:: REM URL: http://stackoverflow.com/questions/12621969/clear-cache-of-browser-by-command-line
-IF NOT EXIST "%TEMP%" GOTO :SkipTemp
-ERASE "%TEMP%\*.*" /F /S /Q
-FOR /D %%i IN ("%TEMP%\*") DO RMDIR /S /Q "%%i"
-:SkipTemp
+SETLOCAL ENABLEDELAYEDEXPANSION
+TITLE Cache Cleaner Utility
 
-IF NOT EXIST "%TMP%" GOTO :SkipTmp
-ERASE "%TMP%\*.*" /F /S /Q
-FOR /D %%i IN ("%TMP%\*") DO RMDIR /S /Q "%%i"
-:SkipTmp
+:: ============================================================
+::  Cache Cleaner Utility
+::  Clears temp files, browser caches, and Java cache
+:: ============================================================
 
-IF NOT EXIST "%ALLUSERSPROFILE%\TEMP" GOTO :SkipAUPTemp
-ERASE "%ALLUSERSPROFILE%\TEMP\*.*" /F /S /Q
-FOR /D %%i IN ("%ALLUSERSPROFILE%\TEMP\*") DO RMDIR /S /Q "%%i"
-:SkipAUPTemp
+:: Check for Administrator privileges
+NET SESSION >NUL 2>&1
+IF %ERRORLEVEL% NEQ 0 (
+    ECHO [ERROR] This script must be run as Administrator.
+    ECHO Right-click the file and select "Run as administrator".
+    PAUSE
+    EXIT /B 1
+)
 
-IF NOT EXIST "%SystemRoot%\TEMP" GOTO :SkipSRTemp
-ERASE "%SystemRoot%\TEMP\*.*" /F /S /Q
-FOR /D %%i IN ("%SystemRoot%\TEMP\*") DO RMDIR /S /Q "%%i"
-:SkipSRTemp
+:: Counters
+SET CLEANED=0
+SET SKIPPED=0
 
-@REM Java Cache
-IF NOT EXIST "%USERPROFILE%\AppData\LocalLow\Sun\Java\Deployment\cache" GOTO :SkipJavaCache
-ERASE "%USERPROFILE%\AppData\LocalLow\Sun\Java\Deployment\cache\*.*" /F /S /Q
-FOR /D %%i IN ("%%a\AppData\LocalLow\Sun\Java\Deployment\cache\*.*" ) DO RMDIR /S /Q "%%i"
-SET JAVA_CMD="%JAVA_HOME%\bin\javaws.exe"
-@REM Remove all non-installed applications from the cache.
-@REM Remove all applications from the cache.
-CALL %JAVA_CMD% -clearcache -uninstall 
-SET JAVA_CMD=
-:SkipJavaCache
+ECHO.
+ECHO  ==========================================
+ECHO   Cache Cleaner Utility
+ECHO  ==========================================
+ECHO.
 
-@REM Clear IE cache -  (Delete All)
-RunDll32.exe InetCpl.cpl,ClearMyTracksByProcess 255
+:: ── Windows Temp Folders ─────────────────────────────────────
 
-IF NOT EXIST "%LOCALAPPDATA%\Microsoft\Windows\Tempor~1" GOTO :SkipLADTemp
-ERASE "%LOCALAPPDATA%\Microsoft\Windows\Tempor~1\*.*" /F /S /Q
-FOR /D %%i IN ("%LOCALAPPDATA%\Microsoft\Windows\Tempor~1\*") DO RMDIR /S /Q "%%i"
-:SkipLADTemp
+CALL :CleanFolder "%TEMP%"              "User Temp"
+CALL :CleanFolder "%TMP%"               "TMP"
+CALL :CleanFolder "%ALLUSERSPROFILE%\TEMP" "All Users Temp"
+CALL :CleanFolder "%SystemRoot%\TEMP"   "System Temp"
 
-@REM Clear Google Chrome cache
-IF NOT EXIST "%LOCALAPPDATA%\Google\Chrome\User Data\" GOTO :SkipChrome
-ERASE "%LOCALAPPDATA%\Google\Chrome\User Data\*.*" /F /S /Q
-FOR /D %%i IN ("%LOCALAPPDATA%\Google\Chrome\User Data\*") DO RMDIR /S /Q "%%i"
-:SkipChrome
+:: ── Java Cache ───────────────────────────────────────────────
 
-@REM Clear Firefox cache
-IF NOT EXIST "%LOCALAPPDATA%\Mozilla\Firefox\Profiles\" GOTO :SkipFirefox
-ERASE "%LOCALAPPDATA%\Mozilla\Firefox\Profiles\*.*" /F /S /Q
-FOR /D %%i IN ("%LOCALAPPDATA%\Mozilla\Firefox\Profiles\*") DO RMDIR /S /Q "%%i"
-:SkipFirefox
+SET "JAVA_CACHE=%USERPROFILE%\AppData\LocalLow\Sun\Java\Deployment\cache"
+IF EXIST "%JAVA_CACHE%" (
+    ECHO [....] Clearing Java Cache...
+    ERASE "%JAVA_CACHE%\*.*" /F /S /Q >NUL 2>&1
+    FOR /D %%i IN ("%JAVA_CACHE%\*") DO RMDIR /S /Q "%%i" >NUL 2>&1
+    IF DEFINED JAVA_HOME (
+        "%JAVA_HOME%\bin\javaws.exe" -clearcache -uninstall >NUL 2>&1
+    )
+    ECHO [ OK ] Java Cache cleared.
+    SET /A CLEANED+=1
+) ELSE (
+    ECHO [SKIP] Java Cache not found.
+    SET /A SKIPPED+=1
+)
 
-@REM Clear Edge Cache
-IF NOT EXIST "%LOCALAPPDATA%\Microsoft\Edge\User Data\" GOTO :SkipEdge
-ERASE "%LOCALAPPDATA%\Microsoft\Edge\User Data\*.*" /F /S /Q
-FOR /D %%i IN ("%LOCALAPPDATA%\Microsoft\Edge\User Data\*") DO RMDIR /S /Q/ "%%~i"
-:SkipEdge
+:: ── Internet Explorer ────────────────────────────────────────
 
+ECHO [....] Clearing Internet Explorer Cache...
+RunDll32.exe InetCpl.cpl,ClearMyTracksByProcess 255 >NUL 2>&1
+CALL :CleanFolder "%LOCALAPPDATA%\Microsoft\Windows\Tempor~1" "IE Temp Files"
+
+:: ── Browser Caches ───────────────────────────────────────────
+
+CALL :CleanFolder "%LOCALAPPDATA%\Google\Chrome\User Data\Default\Cache"  "Google Chrome"
+CALL :CleanFolder "%LOCALAPPDATA%\Mozilla\Firefox\Profiles"               "Mozilla Firefox"
+CALL :CleanFolder "%LOCALAPPDATA%\Microsoft\Edge\User Data\Default\Cache" "Microsoft Edge"
+
+:: ── Summary ──────────────────────────────────────────────────
+
+ECHO.
+ECHO  ==========================================
+ECHO   Complete! Cleaned: %CLEANED%  Skipped: %SKIPPED%
+ECHO  ==========================================
+ECHO.
+PAUSE
 EXIT /B 0
+
+
+:: ============================================================
+::  FUNCTION: CleanFolder
+::  Usage: CALL :CleanFolder "path" "label"
+:: ============================================================
+:CleanFolder
+SET "TARGET=%~1"
+SET "LABEL=%~2"
+
+IF NOT EXIST "%TARGET%" (
+    ECHO [SKIP] %LABEL% not found.
+    SET /A SKIPPED+=1
+    GOTO :EOF
+)
+
+ECHO [....] Clearing %LABEL%...
+ERASE "%TARGET%\*.*" /F /S /Q >NUL 2>&1
+FOR /D %%i IN ("%TARGET%\*") DO RMDIR /S /Q "%%i" >NUL 2>&1
+ECHO [ OK ] %LABEL% cleared.
+SET /A CLEANED+=1
+GOTO :EOF
